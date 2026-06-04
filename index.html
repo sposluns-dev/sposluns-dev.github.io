@@ -360,51 +360,32 @@
   };
 
   // ── Download PNG ──────────────────────────────────────────────────
-  window.downloadPNG = function() {
+  window.downloadPNG = async function() {
     const includeLegend = document.getElementById("includeLegend").checked;
 
-    // Collect SVG and legend elements from pane
-    const svg = pane.querySelector("svg");
-    if (!svg) return;
+    // Temporarily hide legend if not wanted
+    const legendEls = pane.querySelectorAll("div");
+    if (!includeLegend) legendEls.forEach(el => el.style.visibility = "hidden");
 
-    // Clone SVG
-    const clone = svg.cloneNode(true);
-
-    // If legend excluded, remove any Plot legend elements inside SVG
-    if (!includeLegend) {
-      clone.querySelectorAll("[aria-label='legend']").forEach(el => el.remove());
+    // Load html2canvas on demand
+    if (!window.html2canvas) {
+      await new Promise((res, rej) => {
+        const s = document.createElement("script");
+        s.src = "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js";
+        s.onload = res; s.onerror = rej;
+        document.head.appendChild(s);
+      });
     }
 
-    // If pie chart, legend is a <g> — handled by includeLegend already in renderPie
-    // For Plot charts, legend is a sibling div — we'll composite below
-    const legendDiv = includeLegend ? pane.querySelector("div[style*='display: flex']") : null;
+    const canvas = await html2canvas(pane, { backgroundColor: "#ffffff", scale: 2, useCORS: true });
 
-    const svgW = +svg.getAttribute("width") || svg.clientWidth;
-    const svgH = +svg.getAttribute("height") || svg.clientHeight;
+    // Restore legend visibility
+    if (!includeLegend) legendEls.forEach(el => el.style.visibility = "");
 
-    // Inline styles for export
-    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-    const svgStr = new XMLSerializer().serializeToString(clone);
-    const svgBlob = new Blob([svgStr], { type: "image/svg+xml" });
-    const url = URL.createObjectURL(svgBlob);
-
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = svgW;
-      canvas.height = svgH;
-      const ctx = canvas.getContext("2d");
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0);
-      URL.revokeObjectURL(url);
-
-      const a = document.createElement("a");
-      a.download = `scc-2017-${currentView}.png`;
-      a.href = canvas.toDataURL("image/png");
-      a.click();
-    };
-    img.src = url;
+    const a = document.createElement("a");
+    a.download = `scc-2017-${currentView}.png`;
+    a.href = canvas.toDataURL("image/png");
+    a.click();
   };
 
   // Initial render
