@@ -22,7 +22,7 @@
 
     #pane {
       width: 100%; height: 67vh; padding: 24px 32px;
-      background: #fff; overflow: hidden;
+      background: #fff; overflow: hidden; position: relative;
     }
 
     #pane svg { display: block; }
@@ -55,6 +55,13 @@
   <span style="font-size: 13px; font-weight: 600; color: #555;">Province:</span>
   <div id="provinceFilters" style="display: flex; gap: 8px; flex-wrap: wrap;"></div>
   <button id="clearFilters" onclick="clearProvinces()" style="margin-left: auto; font-size: 12px; padding: 4px 10px; border: 1px solid #bbb; border-radius: 4px; background: #fff; cursor: pointer; color: #555;">Clear all</button>
+</div>
+
+<div id="exportBar" style="padding: 8px 32px; background: #fafafa; border-bottom: 1px solid #ddd; display: flex; align-items: center; gap: 16px;">
+  <label style="font-size: 13px; display: flex; align-items: center; gap: 6px; cursor: pointer;">
+    <input type="checkbox" id="includeLegend" checked> Include legend
+  </label>
+  <button onclick="downloadPNG()" style="font-size: 12px; padding: 4px 12px; border: 1px solid #bbb; border-radius: 4px; background: #fff; cursor: pointer; color: #333;">⬇ Download PNG</button>
 </div>
 
 <div id="pane"></div>
@@ -173,7 +180,16 @@
       return { ...d, x, y, r: rScale(d.count) };
     }).filter(d => !isNaN(d.x));
 
-    const svg = d3.create("svg").attr("width", w).attr("height", h);
+    const svg = d3.create("svg").attr("width", w).attr("height", h).style("position", "relative");
+
+    // Tooltip div — attached to body so it sits above SVG
+    const tooltip = d3.select("body").select(".map-tooltip").node()
+      ? d3.select("body").select(".map-tooltip")
+      : d3.select("body").append("div").attr("class", "map-tooltip").style("position", "fixed")
+          .style("background", "rgba(0,0,0,0.75)").style("color", "#fff")
+          .style("padding", "6px 10px").style("border-radius", "4px")
+          .style("font-size", "13px").style("pointer-events", "none")
+          .style("z-index", "9999").style("display", "none");
 
     // Draw provinces
     provinces.features.forEach(f => {
@@ -183,13 +199,47 @@
 
     // Draw bubbles
     pixelDots.forEach(d => {
-      const g = svg.append("g");
-      g.append("circle")
+      svg.append("circle")
         .attr("cx", d.x).attr("cy", d.y).attr("r", d.r)
         .attr("fill", "#c00").attr("fill-opacity", 0.75)
-        .attr("stroke", "white").attr("stroke-width", 1.5);
-      g.append("title").text(`${d.province}: ${d.count} case${d.count !== 1 ? "s" : ""}`);
+        .attr("stroke", "white").attr("stroke-width", 1.5)
+        .style("cursor", "pointer")
+        .on("mousemove", (event) => {
+          tooltip.style("display", "block")
+            .style("left", (event.clientX + 6) + "px")
+            .style("top", (event.clientY - 10) + "px")
+            .text(`${d.province}: ${d.count} case${d.count !== 1 ? "s" : ""}`);
+        })
+        .on("mouseleave", () => tooltip.style("display", "none"));
     });
+
+    // Legend — top right, only when provinces are selected
+    if (pixelDots.length > 0) {
+      const includeLegend = document.getElementById("includeLegend").checked;
+      if (includeLegend) {
+        const sorted = [...pixelDots].sort((a, b) => b.count - a.count);
+        const legendX = w - 200;
+        const legendY = 16;
+        const rowH = 22;
+        const padX = 12, padY = 10;
+        const boxH = padY * 2 + sorted.length * rowH;
+
+        const lg = svg.append("g").attr("transform", `translate(${legendX}, ${legendY})`);
+        lg.append("rect")
+          .attr("width", 188).attr("height", boxH)
+          .attr("rx", 6).attr("fill", "white").attr("fill-opacity", 0.88)
+          .attr("stroke", "#ccc").attr("stroke-width", 1);
+
+        sorted.forEach((d, i) => {
+          const y = padY + i * rowH + rowH / 2;
+          lg.append("circle").attr("cx", padX + 7).attr("cy", y).attr("r", 7)
+            .attr("fill", "#c00").attr("fill-opacity", 0.75).attr("stroke", "white").attr("stroke-width", 1);
+          lg.append("text").attr("x", padX + 20).attr("y", y + 4)
+            .attr("font-size", 12).attr("fill", "#222")
+            .text(`${d.province} — ${d.count} case${d.count !== 1 ? "s" : ""}`);
+        });
+      }
+    }
 
     return svg.node();
   }
@@ -307,6 +357,54 @@
     event.target.classList.add("active");
     currentView = view;
     redraw();
+  };
+
+  // ── Download PNG ──────────────────────────────────────────────────
+  window.downloadPNG = function() {
+    const includeLegend = document.getElementById("includeLegend").checked;
+
+    // Collect SVG and legend elements from pane
+    const svg = pane.querySelector("svg");
+    if (!svg) return;
+
+    // Clone SVG
+    const clone = svg.cloneNode(true);
+
+    // If legend excluded, remove any Plot legend elements inside SVG
+    if (!includeLegend) {
+      clone.querySelectorAll("[aria-label='legend']").forEach(el => el.remove());
+    }
+
+    // If pie chart, legend is a <g> — handled by includeLegend already in renderPie
+    // For Plot charts, legend is a sibling div — we'll composite below
+    const legendDiv = includeLegend ? pane.querySelector("div[style*='display: flex']") : null;
+
+    const svgW = +svg.getAttribute("width") || svg.clientWidth;
+    const svgH = +svg.getAttribute("height") || svg.clientHeight;
+
+    // Inline styles for export
+    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    const svgStr = new XMLSerializer().serializeToString(clone);
+    const svgBlob = new Blob([svgStr], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(svgBlob);
+
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = svgW;
+      canvas.height = svgH;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+
+      const a = document.createElement("a");
+      a.download = `scc-2017-${currentView}.png`;
+      a.href = canvas.toDataURL("image/png");
+      a.click();
+    };
+    img.src = url;
   };
 
   // Initial render
