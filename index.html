@@ -159,7 +159,7 @@
     const pd = filteredProvinceData();
     const countMap = new Map(pd.map(d => [d.province, d.count]));
     const maxCount = d3.max(allProvinces, d => d.count);
-    const rScale = d3.scaleSqrt().domain([0, maxCount]).range([0, 60]);
+    const rScale = d3.scaleSqrt().domain([0, maxCount]).range([0, 100]);
 
     const dots = geoCentroids
       .map(d => ({ ...d, count: countMap.get(d.province) ?? 0 }))
