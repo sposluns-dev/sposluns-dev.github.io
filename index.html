@@ -14,6 +14,42 @@
 </head>
 <body>
   <h1>SCC 2017 Rulings</h1>
+
+  <h2>Canada Map — Provinces Outline</h2>
+  <div id="canadaMap"></div>
+
+  <h2>Canada Map — Provinces by Name</h2>
+  <div id="canadaMapFilled"></div>
+
+  <script type="module">
+    import * as Plot from "https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6/+esm";
+    import * as topojson from "https://cdn.jsdelivr.net/npm/topojson-client@3/+esm";
+
+    const topo = await fetch("plots/canadaprovtopo.json").then(r => r.json());
+    const provinces = topojson.feature(topo, topo.objects.canadaprov);
+    const provincemesh = topojson.mesh(topo, topo.objects.canadaprov);
+
+    const mount = (id, chart) => document.getElementById(id).appendChild(chart);
+
+    mount("canadaMap", Plot.plot({
+      projection: "equirectangular",
+      width: 800,
+      marks: [
+        Plot.geo(provinces, { fill: "#ddd", stroke: "white", strokeWidth: 1 })
+      ]
+    }));
+
+    mount("canadaMapFilled", Plot.plot({
+      projection: "equirectangular",
+      width: 800,
+      color: { legend: true },
+      marks: [
+        Plot.geo(provinces.features, { fill: d => d.properties.name, tip: true, title: d => d.properties.name }),
+        Plot.geo(provincemesh, { stroke: "white", strokeWidth: 0.5 })
+      ]
+    }));
+  </script>
+
   <table>
     <thead>
       <tr>
