@@ -239,13 +239,23 @@
       province: d.province
     }));
 
+    // Pre-aggregate: one row per month+province with count
+    const grouped = Array.from(
+      d3.rollup(td, v => v.length, d => d.month, d => d.province),
+      ([month, byProv]) => Array.from(byProv, ([province, count]) => ({
+        date: new Date(month + "-01"),
+        province,
+        count
+      }))
+    ).flat().sort((a, b) => a.date - b.date);
+
     return Plot.plot({
       width: paneW(), height: paneH(),
-      x: { label: "Month" },
+      x: { label: "Month", type: "band" },
       y: { label: "Cases" },
       color: { legend: true },
       marks: [
-        Plot.barY(td, Plot.groupX({ y: "count" }, { x: "date", fill: "province", tip: true })),
+        Plot.barY(grouped, Plot.stackY({ x: "date", y: "count", fill: "province", tip: true })),
         Plot.ruleY([0])
       ]
     });
