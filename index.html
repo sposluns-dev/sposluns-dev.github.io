@@ -51,6 +51,12 @@
   <button onclick="showView('timeline')">Timeline</button>
 </nav>
 
+<div id="filterBar" style="padding: 12px 32px; background: #f5f5f5; border-bottom: 1px solid #ddd; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+  <span style="font-size: 13px; font-weight: 600; color: #555;">Province:</span>
+  <div id="provinceFilters" style="display: flex; gap: 8px; flex-wrap: wrap;"></div>
+  <button id="clearFilters" onclick="clearProvinces()" style="margin-left: auto; font-size: 12px; padding: 4px 10px; border: 1px solid #bbb; border-radius: 4px; background: #fff; cursor: pointer; color: #555;">Clear all</button>
+</div>
+
 <div id="pane"></div>
 
 <div id="tablePane" style="padding: 24px 32px; background: #fff; border-top: 1px solid #ddd;">
@@ -82,138 +88,208 @@
   const provinces = topojson.feature(topo, topo.objects.canadaprov);
   const provincemesh = topojson.mesh(topo, topo.objects.canadaprov);
 
-  // Province case counts
-  const counts = d3.rollup(cases.filter(d => d.province), v => v.length, d => d.province);
-  const provinceData = Array.from(counts, ([province, count]) => ({ province, count }))
-    .sort((a, b) => b.count - a.count);
+  // All provinces sorted by case count
+  const allProvinces = Array.from(
+    d3.rollup(cases.filter(d => d.province), v => v.length, d => d.province),
+    ([province, count]) => ({ province, count })
+  ).sort((a, b) => b.count - a.count);
 
-  // Attach count to each feature for the map
-  provinces.features.forEach(f => {
-    const name = f.properties.name;
-    f.properties.count = counts.get(name) ?? 0;
+  // Geographic centroids (lon/lat) per province feature
+  const geoCentroids = provinces.features.map(f => ({
+    province: f.properties.name,
+    lonlat: d3.geoCentroid(f)
+  }));
+
+  // ── Province filter state ─────────────────────────────────────────
+  let selectedProvinces = new Set();
+
+  // Build filter chips
+  const filterContainer = document.getElementById("provinceFilters");
+  allProvinces.forEach(({ province }) => {
+    const btn = document.createElement("button");
+    btn.textContent = province;
+    btn.dataset.province = province;
+    btn.style.cssText = "font-size:12px;padding:4px 10px;border:1px solid #bbb;border-radius:12px;background:#fff;cursor:pointer;color:#555;";
+    btn.onclick = () => toggleProvince(province, btn);
+    filterContainer.appendChild(btn);
   });
 
-  // Centroid lookup for bubble positions
-  const path = d3.geoPath(d3.geoEquirectangular().fitSize([paneW(), paneH()], provinces));
-  const centroids = provinces.features.map(f => ({
-    province: f.properties.name,
-    count: f.properties.count,
-    centroid: path.centroid(f)
-  })).filter(d => d.count > 0 && !isNaN(d.centroid[0]));
+  function toggleProvince(province, btn) {
+    if (selectedProvinces.has(province)) {
+      selectedProvinces.delete(province);
+      btn.style.background = "#fff";
+      btn.style.color = "#555";
+      btn.style.borderColor = "#bbb";
+    } else {
+      selectedProvinces.add(province);
+      btn.style.background = "#c00";
+      btn.style.color = "#fff";
+      btn.style.borderColor = "#c00";
+    }
+    redraw();
+  }
 
-  // Timeline data — cases per month
-  const monthly = d3.rollup(
-    cases,
-    v => v.length,
-    d => d.document_date_en.slice(0, 7)
-  );
-  const timelineData = Array.from(monthly, ([month, count]) => ({
-    date: new Date(month + "-01"),
-    count
-  })).sort((a, b) => a.date - b.date);
-
-  // Populate table
-  const tbody = document.getElementById("tableBody");
-  [...cases].sort((a, b) => a.citation_en.localeCompare(b.citation_en, undefined, { numeric: true }))
-    .forEach(d => {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td>${d.citation_en}</td>
-        <td><a href="${d.url_en}" target="_blank">${d.name_en}</a></td>
-        <td>${d.document_date_en.slice(0, 10)}</td>
-        <td>${d.province ?? "—"}</td>`;
-      tbody.appendChild(tr);
+  window.clearProvinces = function() {
+    selectedProvinces.clear();
+    filterContainer.querySelectorAll("button").forEach(b => {
+      b.style.background = "#fff"; b.style.color = "#555"; b.style.borderColor = "#bbb";
     });
+    redraw();
+  };
+
+  // Filtered data helpers
+  function filteredCases() {
+    if (selectedProvinces.size === 0) return cases;
+    return cases.filter(d => selectedProvinces.has(d.province));
+  }
+
+  function filteredProvinceData() {
+    const fc = filteredCases();
+    return Array.from(
+      d3.rollup(fc.filter(d => d.province), v => v.length, d => d.province),
+      ([province, count]) => ({ province, count })
+    ).sort((a, b) => b.count - a.count);
+  }
 
   // ── Views ─────────────────────────────────────────────────────────
+  let currentView = "map";
+
   function renderMap() {
     const w = paneW(), h = paneH();
-    const proj = d3.geoEquirectangular().fitSize([w, h], provinces);
-    const p = d3.geoPath(proj);
-    const maxR = 40;
-    const rScale = d3.scaleSqrt().domain([0, d3.max(provinceData, d => d.count)]).range([0, maxR]);
+    const pd = filteredProvinceData();
+    const countMap = new Map(pd.map(d => [d.province, d.count]));
+    const maxCount = d3.max(allProvinces, d => d.count);
+    const rScale = d3.scaleSqrt().domain([0, maxCount]).range([0, 36]);
 
-    const dots = provinces.features.map(f => {
-      const c = p.centroid(f);
-      return { province: f.properties.name, count: f.properties.count, x: c[0], y: c[1] };
-    }).filter(d => d.count > 0 && !isNaN(d.x));
+    const dots = geoCentroids
+      .map(d => ({ ...d, count: countMap.get(d.province) ?? 0 }))
+      .filter(d => d.count > 0);
 
     return Plot.plot({
       width: w, height: h,
-      projection: { type: "equirectangular", domain: provinces },
+      projection: { type: "conic-conformal", parallels: [49, 77], rotate: [96, 0], domain: provinces },
       marks: [
         Plot.geo(provinces.features, { fill: "#bbb", stroke: "white", strokeWidth: 0.8 }),
         Plot.geo(provincemesh, { stroke: "#999", strokeWidth: 0.4 }),
-        Plot.dot(dots, {
-          x: d => d.x, y: d => d.y,
+        Plot.dot(dots, Plot.geoCentroid({
+          geometry: d => ({ type: "Point", coordinates: d.lonlat }),
           r: d => rScale(d.count),
           fill: "#c00", fillOpacity: 0.75,
           stroke: "white", strokeWidth: 1,
           tip: true,
-          title: d => `${d.province}\n${d.count} case${d.count !== 1 ? "s" : ""}`
-        })
+          title: d => `${d.province}: ${d.count} case${d.count !== 1 ? "s" : ""}`
+        }))
       ]
     });
   }
 
   function renderBar() {
+    const pd = filteredProvinceData();
     return Plot.plot({
       width: paneW(), height: paneH(),
       marginLeft: 160,
       x: { label: "Number of Cases" },
       y: { label: null },
       marks: [
-        Plot.barX(provinceData, {
-          x: "count", y: "province",
-          fill: "#c00", sort: { y: "x", order: "descending" }
-        }),
-        Plot.text(provinceData, {
-          x: "count", y: "province",
-          text: d => d.count, dx: 6, fill: "#222", fontSize: 12
-        }),
+        Plot.barX(pd, { x: "count", y: "province", fill: "#c00", sort: { y: "x", order: "descending" } }),
+        Plot.text(pd, { x: "count", y: "province", text: d => d.count, dx: 6, fill: "#222", fontSize: 12 }),
         Plot.ruleX([0])
       ]
     });
   }
 
   function renderPie() {
+    const pd = filteredProvinceData();
+    const w = paneW(), h = paneH();
+    const r = Math.min(w, h) / 2 - 40;
+    const color = d3.scaleOrdinal(d3.schemeTableau10).domain(pd.map(d => d.province));
+    const pie = d3.pie().value(d => d.count)(pd);
+    const arc = d3.arc().innerRadius(0).outerRadius(r);
+
+    const svg = d3.create("svg").attr("width", w).attr("height", h);
+    const g = svg.append("g").attr("transform", `translate(${w / 2},${h / 2})`);
+
+    g.selectAll("path").data(pie).join("path")
+      .attr("d", arc)
+      .attr("fill", d => color(d.data.province))
+      .attr("stroke", "white").attr("stroke-width", 1.5)
+      .append("title").text(d => `${d.data.province}: ${d.data.count}`);
+
+    g.selectAll("text").data(pie.filter(d => (d.endAngle - d.startAngle) > 0.25)).join("text")
+      .attr("transform", d => `translate(${arc.centroid(d)})`)
+      .attr("text-anchor", "middle").attr("font-size", 11).attr("fill", "white")
+      .text(d => d.data.province.replace("British Columbia","BC").replace("Newfoundland And Labrador","NL"));
+
+    // Legend
+    const legend = svg.append("g").attr("transform", `translate(${w - 180}, 20)`);
+    pd.forEach((d, i) => {
+      legend.append("rect").attr("x", 0).attr("y", i * 18).attr("width", 12).attr("height", 12).attr("fill", color(d.province));
+      legend.append("text").attr("x", 16).attr("y", i * 18 + 10).attr("font-size", 11).text(`${d.province} (${d.count})`);
+    });
+
+    return svg.node();
+  }
+
+  function renderTimeline() {
+    const fc = filteredCases().filter(d => d.province);
+    // Build one row per case with month + province
+    const td = fc.map(d => ({
+      month: d.document_date_en.slice(0, 7),
+      date: new Date(d.document_date_en.slice(0, 7) + "-01"),
+      province: d.province
+    }));
+
     return Plot.plot({
-      width: Math.min(paneW(), paneH()),
-      height: Math.min(paneW(), paneH()),
+      width: paneW(), height: paneH(),
+      x: { label: "Month" },
+      y: { label: "Cases" },
+      color: { legend: true },
       marks: [
-        Plot.arc(provinceData, {
-          theta: "count", fill: "province",
-          tip: true, title: d => `${d.province}: ${d.count}`
-        })
+        Plot.barY(td, Plot.groupX({ y: "count" }, { x: "date", fill: "province", tip: true })),
+        Plot.ruleY([0])
       ]
     });
   }
 
-  function renderTimeline() {
-    return Plot.plot({
-      width: paneW(), height: paneH(),
-      x: { type: "utc", label: "Month" },
-      y: { label: "Cases" },
-      marks: [
-        Plot.barY(timelineData, { x: "date", y: "count", fill: "#c00", tip: true }),
-        Plot.ruleY([0])
-      ]
-    });
+  // ── Table ─────────────────────────────────────────────────────────
+  const tbody = document.getElementById("tableBody");
+
+  function renderTable() {
+    tbody.innerHTML = "";
+    const fc = filteredCases();
+    [...fc].sort((a, b) => a.citation_en.localeCompare(b.citation_en, undefined, { numeric: true }))
+      .forEach(d => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${d.citation_en}</td>
+          <td><a href="${d.url_en}" target="_blank">${d.name_en}</a></td>
+          <td>${d.document_date_en.slice(0, 10)}</td>
+          <td>${d.province ?? "—"}</td>`;
+        tbody.appendChild(tr);
+      });
+  }
+
+  // ── Redraw ────────────────────────────────────────────────────────
+  function redraw() {
+    pane.innerHTML = "";
+    const chart = currentView === "map" ? renderMap()
+      : currentView === "bar" ? renderBar()
+      : currentView === "pie" ? renderPie()
+      : renderTimeline();
+    pane.appendChild(chart);
+    renderTable();
   }
 
   // ── View switcher ─────────────────────────────────────────────────
   window.showView = function(view) {
     document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
     event.target.classList.add("active");
-    pane.innerHTML = "";
-    const chart = view === "map" ? renderMap()
-      : view === "bar" ? renderBar()
-      : view === "pie" ? renderPie()
-      : renderTimeline();
-    pane.appendChild(chart);
+    currentView = view;
+    redraw();
   };
 
   // Initial render
+  renderTable();
   pane.appendChild(renderMap());
 </script>
 </body>
