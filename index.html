@@ -5,86 +5,220 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SCC 2017 Rulings</title>
   <style>
-    body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; }
-    table { width: 100%; border-collapse: collapse; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background: #f9f9f9; color: #222; }
+
+    header { padding: 24px 32px 12px; background: #fff; border-bottom: 1px solid #ddd; }
+    header h1 { font-size: 22px; }
+    header p { font-size: 13px; color: #666; margin-top: 4px; }
+
+    nav { display: flex; gap: 0; background: #fff; border-bottom: 2px solid #ddd; padding: 0 32px; }
+    nav button {
+      padding: 12px 24px; border: none; background: none; cursor: pointer;
+      font-size: 14px; color: #555; border-bottom: 3px solid transparent; margin-bottom: -2px;
+    }
+    nav button.active { color: #c00; border-bottom-color: #c00; font-weight: 600; }
+    nav button:hover:not(.active) { color: #222; background: #f5f5f5; }
+
+    #pane {
+      width: 100%; height: 67vh; padding: 24px 32px;
+      background: #fff; overflow: hidden;
+    }
+
+    #pane svg { display: block; }
+
+    #tablePane {
+      display: none; padding: 24px 32px; background: #fff;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
     th { text-align: left; border-bottom: 2px solid #333; padding: 8px; }
-    td { padding: 8px; border-bottom: 1px solid #ddd; }
-    a { color: #0066cc; }
+    td { padding: 8px; border-bottom: 1px solid #eee; }
+    a { color: #0066cc; text-decoration: none; }
+    a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
+
+<header>
   <h1>SCC 2017 Rulings</h1>
+  <p>Supreme Court of Canada — 2017 decisions. Source: <a href="https://a2aj.ca" target="_blank">A2AJ Canadian Legal Data</a></p>
+</header>
 
-  <h2>Canada Map — Provinces Outline</h2>
-  <div id="canadaMap"></div>
+<nav>
+  <button class="active" onclick="showView('map')">Map</button>
+  <button onclick="showView('bar')">Bar</button>
+  <button onclick="showView('pie')">Pie</button>
+  <button onclick="showView('timeline')">Timeline</button>
+  <button onclick="showView('table')">Table</button>
+</nav>
 
-  <h2>Canada Map — Provinces by Name</h2>
-  <div id="canadaMapFilled"></div>
-
-  <script type="module">
-    import * as Plot from "https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6/+esm";
-    import * as topojson from "https://cdn.jsdelivr.net/npm/topojson-client@3/+esm";
-
-    const topo = await fetch("plots/canadaprovtopo.json").then(r => r.json());
-    const provinces = topojson.feature(topo, topo.objects.canadaprov);
-    const provincemesh = topojson.mesh(topo, topo.objects.canadaprov);
-
-    const mount = (id, chart) => document.getElementById(id).appendChild(chart);
-
-    mount("canadaMap", Plot.plot({
-      projection: "equirectangular",
-      width: 800,
-      marks: [
-        Plot.geo(provinces, { fill: "#ddd", stroke: "white", strokeWidth: 1 })
-      ]
-    }));
-
-    mount("canadaMapFilled", Plot.plot({
-      projection: "equirectangular",
-      width: 800,
-      color: { legend: true },
-      marks: [
-        Plot.geo(provinces.features, { fill: d => d.properties.name, tip: true, title: d => d.properties.name }),
-        Plot.geo(provincemesh, { stroke: "white", strokeWidth: 0.5 })
-      ]
-    }));
-  </script>
-
+<div id="pane"></div>
+<div id="tablePane">
   <table>
     <thead>
-      <tr>
-        <th>Citation</th>
-        <th>Case Name</th>
-        <th>Date</th>
-      </tr>
+      <tr><th>Citation</th><th>Case Name</th><th>Date</th><th>Province</th></tr>
     </thead>
-    <tbody>
-      <tr>
-        <td>2017 SCC 1</td>
-        <td><a href="https://decisions.scc-csc.ca/scc-csc/scc-csc/en/item/16325/index.do" target="_blank">Ernst v. Alberta Energy Regulator</a></td>
-        <td>2017-01-13</td>
-      </tr>
-      <tr>
-        <td>2017 SCC 2</td>
-        <td><a href="https://decisions.scc-csc.ca/scc-csc/scc-csc/en/item/16344/index.do" target="_blank">R. v. Awer</a></td>
-        <td>2017-01-19</td>
-      </tr>
-      <tr>
-        <td>2017 SCC 3</td>
-        <td><a href="https://decisions.scc-csc.ca/scc-csc/scc-csc/en/item/16345/index.do" target="_blank">R. v. Clark</a></td>
-        <td>2017-01-19</td>
-      </tr>
-      <tr>
-        <td>2017 SCC 4</td>
-        <td><a href="https://decisions.scc-csc.ca/scc-csc/scc-csc/en/item/16346/index.do" target="_blank">R. v. Bédard</a></td>
-        <td>2017-01-23</td>
-      </tr>
-      <tr>
-        <td>2017 SCC 5</td>
-        <td><a href="https://decisions.scc-csc.ca/scc-csc/scc-csc/en/item/16347/index.do" target="_blank">R. v. Natewayes</a></td>
-        <td>2017-01-23</td>
-      </tr>
-    </tbody>
+    <tbody id="tableBody"></tbody>
   </table>
+</div>
+
+<script type="module">
+  import * as Plot from "https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6/+esm";
+  import * as topojson from "https://cdn.jsdelivr.net/npm/topojson-client@3/+esm";
+  import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7/+esm";
+
+  const pane = document.getElementById("pane");
+  const paneH = () => pane.clientHeight - 48;
+  const paneW = () => pane.clientWidth - 64;
+
+  // Load data
+  const [cases, topo] = await Promise.all([
+    fetch("cases.json").then(r => r.json()),
+    fetch("plots/canadaprovtopo.json").then(r => r.json())
+  ]);
+
+  const provinces = topojson.feature(topo, topo.objects.canadaprov);
+  const provincemesh = topojson.mesh(topo, topo.objects.canadaprov);
+
+  // Province case counts
+  const counts = d3.rollup(cases.filter(d => d.province), v => v.length, d => d.province);
+  const provinceData = Array.from(counts, ([province, count]) => ({ province, count }))
+    .sort((a, b) => b.count - a.count);
+
+  // Attach count to each feature for the map
+  provinces.features.forEach(f => {
+    const name = f.properties.name;
+    f.properties.count = counts.get(name) ?? 0;
+  });
+
+  // Centroid lookup for bubble positions
+  const path = d3.geoPath(d3.geoEquirectangular().fitSize([paneW(), paneH()], provinces));
+  const centroids = provinces.features.map(f => ({
+    province: f.properties.name,
+    count: f.properties.count,
+    centroid: path.centroid(f)
+  })).filter(d => d.count > 0 && !isNaN(d.centroid[0]));
+
+  // Timeline data — cases per month
+  const monthly = d3.rollup(
+    cases,
+    v => v.length,
+    d => d.document_date_en.slice(0, 7)
+  );
+  const timelineData = Array.from(monthly, ([month, count]) => ({
+    date: new Date(month + "-01"),
+    count
+  })).sort((a, b) => a.date - b.date);
+
+  // Populate table
+  const tbody = document.getElementById("tableBody");
+  [...cases].sort((a, b) => a.citation_en.localeCompare(b.citation_en, undefined, { numeric: true }))
+    .forEach(d => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${d.citation_en}</td>
+        <td><a href="${d.url_en}" target="_blank">${d.name_en}</a></td>
+        <td>${d.document_date_en.slice(0, 10)}</td>
+        <td>${d.province ?? "—"}</td>`;
+      tbody.appendChild(tr);
+    });
+
+  // ── Views ─────────────────────────────────────────────────────────
+  function renderMap() {
+    const w = paneW(), h = paneH();
+    const proj = d3.geoEquirectangular().fitSize([w, h], provinces);
+    const p = d3.geoPath(proj);
+    const maxR = 40;
+    const rScale = d3.scaleSqrt().domain([0, d3.max(provinceData, d => d.count)]).range([0, maxR]);
+
+    const dots = provinces.features.map(f => {
+      const c = p.centroid(f);
+      return { province: f.properties.name, count: f.properties.count, x: c[0], y: c[1] };
+    }).filter(d => d.count > 0 && !isNaN(d.x));
+
+    return Plot.plot({
+      width: w, height: h,
+      projection: { type: "equirectangular", domain: provinces },
+      marks: [
+        Plot.geo(provinces.features, { fill: "#bbb", stroke: "white", strokeWidth: 0.8 }),
+        Plot.geo(provincemesh, { stroke: "#999", strokeWidth: 0.4 }),
+        Plot.dot(dots, {
+          x: d => d.x, y: d => d.y,
+          r: d => rScale(d.count),
+          fill: "#c00", fillOpacity: 0.75,
+          stroke: "white", strokeWidth: 1,
+          tip: true,
+          title: d => `${d.province}\n${d.count} case${d.count !== 1 ? "s" : ""}`
+        })
+      ]
+    });
+  }
+
+  function renderBar() {
+    return Plot.plot({
+      width: paneW(), height: paneH(),
+      marginLeft: 160,
+      x: { label: "Number of Cases" },
+      y: { label: null },
+      marks: [
+        Plot.barX(provinceData, {
+          x: "count", y: "province",
+          fill: "#c00", sort: { y: "x", order: "descending" }
+        }),
+        Plot.text(provinceData, {
+          x: "count", y: "province",
+          text: d => d.count, dx: 6, fill: "#222", fontSize: 12
+        }),
+        Plot.ruleX([0])
+      ]
+    });
+  }
+
+  function renderPie() {
+    return Plot.plot({
+      width: Math.min(paneW(), paneH()),
+      height: Math.min(paneW(), paneH()),
+      marks: [
+        Plot.arc(provinceData, {
+          theta: "count", fill: "province",
+          tip: true, title: d => `${d.province}: ${d.count}`
+        })
+      ]
+    });
+  }
+
+  function renderTimeline() {
+    return Plot.plot({
+      width: paneW(), height: paneH(),
+      x: { type: "utc", label: "Month" },
+      y: { label: "Cases" },
+      marks: [
+        Plot.barY(timelineData, { x: "date", y: "count", fill: "#c00", tip: true }),
+        Plot.ruleY([0])
+      ]
+    });
+  }
+
+  // ── View switcher ─────────────────────────────────────────────────
+  window.showView = function(view) {
+    document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
+    event.target.classList.add("active");
+
+    pane.style.display = view === "table" ? "none" : "block";
+    document.getElementById("tablePane").style.display = view === "table" ? "block" : "none";
+
+    if (view === "table") return;
+
+    pane.innerHTML = "";
+    const chart = view === "map" ? renderMap()
+      : view === "bar" ? renderBar()
+      : view === "pie" ? renderPie()
+      : renderTimeline();
+    pane.appendChild(chart);
+  };
+
+  // Initial render
+  pane.appendChild(renderMap());
+</script>
 </body>
 </html>
